@@ -2,7 +2,8 @@ const topic = "smith";
 const myId = Math.random().toString(36).substr(2, 11);
 const EVENT_TYPE = {
   JOIN: 1,
-  SIMPLEPEER: 2,
+  LEAVE: 2,
+  SIMPLEPEER: 3,
 };
 let peers = {};
 
@@ -24,12 +25,22 @@ mqttClient.onMessageArrived = (message) => {
       case EVENT_TYPE.JOIN:
         handleNewPeer(parsedMessage.id);
         break;
+      case EVENT_TYPE.LEAVE:
+        handleRemovePeer(parsedMessage.id);
+        break;
       case EVENT_TYPE.SIMPLEPEER:
         handleSimplePeer(parsedMessage.id, parsedMessage.body);
         break;
     }
   }
 };
+
+const lwt = new Paho.MQTT.Message(
+  JSON.stringify({ id: myId, type: EVENT_TYPE.LEAVE, body: "" })
+);
+lwt.destinationName = topic;
+lwt.qos = 0;
+lwt.retained = false;
 
 mqttClient.connect({
   onSuccess: () => {
@@ -40,6 +51,7 @@ mqttClient.connect({
     sendToMqtt(EVENT_TYPE.JOIN, "join");
   },
   useSSL: false,
+  willMessage: lwt,
 });
 
 function sendToMqtt(type, data, peerId) {
@@ -56,10 +68,18 @@ function sendToMqtt(type, data, peerId) {
 
 function handleNewPeer(peerId) {
   const peer = createPeerFactory(peerId, true);
-  peer.on("connect", () => {
-    console.log("establish datachannel");
-    peer.send("hello");
-  });
+}
+
+function handleRemovePeer(peerId) {
+  console.log("leave id:", peerId);
+
+  let peer = getPeerById(peerId);
+  if (!peer) {
+    return;
+  }
+
+  peer.destroy();
+  delete peers[peerId];
 }
 
 function handleSimplePeer(peerId, signal) {
@@ -85,6 +105,7 @@ function createPeerFactory(peerId, initiator) {
   });
   peer.on("data", (data) => {
     console.log("datachannel:", data);
+    addMessage(data);
   });
   peer.on("close", () => {
     console.log("close peer. id:", peerId);
@@ -96,4 +117,20 @@ function createPeerFactory(peerId, initiator) {
   peers[peerId] = peer;
 
   return peer;
+}
+
+function sendMessage() {
+  const input = document.querySelector("input");
+  const message = input.value;
+
+  Object.values(peers).forEach((peer) => {
+    peer.send(message);
+  });
+
+  input.value = "";
+}
+
+function addMessage(message) {
+  const textarea = document.querySelector("textarea");
+  textarea.value += message + "\n";
 }
