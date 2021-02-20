@@ -1,15 +1,15 @@
 const topic = "smith";
-const userId = Math.random().toString(36).substr(2, 11);
+const myId = Math.random().toString(36).substr(2, 11);
 const EVENT_TYPE = {
   JOIN: 1,
   SIMPLEPEER: 2,
 };
-let peer = null;
+let peers = {};
 
-console.log("user:", userId);
+console.log("myId:", myId);
 
 // mqtt
-mqttClient = new Paho.MQTT.Client("", 9001, userId);
+mqttClient = new Paho.MQTT.Client("", 9001, myId);
 mqttClient.onConnectionLost = (responseObject) => {
   if (responseObject.errorCode !== 0) {
     console.log("onConnectionLost:" + responseObject.errorMessage);
@@ -17,15 +17,15 @@ mqttClient.onConnectionLost = (responseObject) => {
 };
 mqttClient.onMessageArrived = (message) => {
   const parsedMessage = JSON.parse(message.payloadString);
-  if (parsedMessage.id !== userId) {
+  if (parsedMessage.id !== myId) {
     console.log("receive from mqtt:" + message.payloadString);
 
     switch (parsedMessage.type) {
       case EVENT_TYPE.JOIN:
-        handleJOIN();
+        handleNewPeer(parsedMessage.id);
         break;
       case EVENT_TYPE.SIMPLEPEER:
-        handleSIMPLEPEER(parsedMessage.body);
+        handleSimplePeer(parsedMessage.id, parsedMessage.body);
         break;
     }
   }
@@ -35,56 +35,65 @@ mqttClient.connect({
   onSuccess: () => {
     console.log("connet to mqtt broker");
     mqttClient.subscribe(topic);
+    mqttClient.subscribe(topic + "/whisper/" + myId);
 
-    sendToMqtt(EVENT_TYPE.JOIN, "");
+    sendToMqtt(EVENT_TYPE.JOIN, "join");
   },
   useSSL: false,
 });
 
-function sendToMqtt(type, data) {
+function sendToMqtt(type, data, peerId) {
   console.log("send to mqtt:" + data);
   const message = new Paho.MQTT.Message(
-    JSON.stringify({ id: userId, type, body: data })
+    JSON.stringify({ id: myId, type, body: data })
   );
-  message.destinationName = topic;
+
+  const dst = peerId ? topic + "/whisper/" + peerId : topic;
+  console.log(dst);
+  message.destinationName = dst;
   mqttClient.send(message);
 }
 
-function handleJOIN() {
-  peer = new SimplePeer({ initiator: true });
-  peer.on("signal", (data) => {
-    sendToMqtt(EVENT_TYPE.SIMPLEPEER, data);
-  });
+function handleNewPeer(peerId) {
+  const peer = createPeerFactory(peerId, true);
   peer.on("connect", () => {
     console.log("establish datachannel");
     peer.send("hello");
   });
+}
+
+function handleSimplePeer(peerId, signal) {
+  let peer = getPeerById(peerId);
+  if (!peer) {
+    peer = createPeerFactory(peerId, false);
+  }
+  peer.signal(signal);
+}
+
+function getPeerById(peerId) {
+  return peers[peerId];
+}
+
+function createPeerFactory(peerId, initiator) {
+  console.log("create new peer:", peerId);
+  const peer = new SimplePeer({ initiator });
+  peer.on("signal", (data) => {
+    sendToMqtt(EVENT_TYPE.SIMPLEPEER, data, peerId);
+  });
+  peer.on("connect", () => {
+    console.log("establish datachannel");
+  });
+  peer.on("data", (data) => {
+    console.log("datachannel:", data);
+  });
   peer.on("close", () => {
-    console.log("close peer");
+    console.log("close peer. id:", peerId);
   });
   peer.on("error", (err) => {
     console.log("err:", err);
   });
-}
 
-function handleSIMPLEPEER(signal) {
-  if (peer === null) {
-    peer = new SimplePeer({ initiator: false });
-    peer.on("signal", (data) => {
-      sendToMqtt(EVENT_TYPE.SIMPLEPEER, data);
-    });
-    peer.on("connect", () => {
-      console.log("establish datachannel");
-    });
-    peer.on("data", (data) => {
-      console.log("datachannel:", data);
-    });
-    peer.on("close", () => {
-      console.log("close peer");
-    });
-    peer.on("error", (err) => {
-      console.log("err:", err);
-    });
-  }
-  peer.signal(signal);
+  peers[peerId] = peer;
+
+  return peer;
 }

@@ -2,7 +2,7 @@ const mqtt = require("mqtt");
 const client = mqtt.connect({
   hostname: "",
   port: 9001,
-  protocol: "ws",
+  protocol: "wss",
 });
 
 client.on("connect", function () {
