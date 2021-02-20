@@ -8,5 +8,5 @@ services:
       - ~/mosquitto/data:/mosquitto/data
       - ~/mosquitto/log:/mosquitto/log
     ports:
-      - "9001:9001"
+      - "80:80"
     restart: always
